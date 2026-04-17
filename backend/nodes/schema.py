@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import pandas as pd
@@ -67,7 +68,12 @@ def _infer_type(series: pd.Series) -> str:
     if is_datetime64_any_dtype(series):
         return "datetime"
 
-    datetime_parse_rate = pd.to_datetime(non_null.head(50), errors="coerce").notna().mean()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        datetime_parse_rate = pd.to_datetime(
+            non_null.head(50),
+            errors="coerce",
+        ).notna().mean()
     if datetime_parse_rate >= 0.8:
         return "datetime"
 

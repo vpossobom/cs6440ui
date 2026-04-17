@@ -57,21 +57,28 @@ def generate_fhir_mapping(
         raise RuntimeError("ANTHROPIC_API_KEY is required to generate FHIR mappings.")
 
     client = Anthropic(api_key=api_key)
+    model = os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
     try:
-        response = client.messages.create(
-            model=os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL),
-            max_tokens=1600,
-            temperature=0,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": _build_user_prompt(schema_summary, sample_rows, resource_type),
-                }
-            ],
+        response = _create_mapping_message(
+            client=client,
+            model=model,
+            schema_summary=schema_summary,
+            sample_rows=sample_rows,
+            resource_type=resource_type,
         )
     except AnthropicError as exc:
-        raise RuntimeError(f"Claude mapping request failed: {exc}") from exc
+        if model == DEFAULT_MODEL or not _is_model_not_found_error(exc):
+            raise RuntimeError(f"Claude mapping request failed: {exc}") from exc
+        try:
+            response = _create_mapping_message(
+                client=client,
+                model=DEFAULT_MODEL,
+                schema_summary=schema_summary,
+                sample_rows=sample_rows,
+                resource_type=resource_type,
+            )
+        except AnthropicError as fallback_exc:
+            raise RuntimeError(f"Claude mapping request failed: {fallback_exc}") from fallback_exc
 
     response_text = _message_text(response)
     mapping = parse_mapping_response(response_text)
@@ -79,6 +86,31 @@ def generate_fhir_mapping(
     mapping.setdefault("mappings", [])
 
     return mapping
+
+
+def _is_model_not_found_error(exc: AnthropicError) -> bool:
+    return getattr(exc, "status_code", None) == 404 and "model:" in str(exc)
+
+
+def _create_mapping_message(
+    client: Anthropic,
+    model: str,
+    schema_summary: dict[str, Any],
+    sample_rows: list[dict[str, Any]],
+    resource_type: str,
+) -> Any:
+    return client.messages.create(
+        model=model,
+        max_tokens=1600,
+        temperature=0,
+        system=SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": _build_user_prompt(schema_summary, sample_rows, resource_type),
+            }
+        ],
+    )
 
 
 def parse_mapping_response(response_text: str) -> dict[str, Any]:

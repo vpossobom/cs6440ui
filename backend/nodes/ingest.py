@@ -25,8 +25,8 @@ def read_source_file(file_path: str) -> tuple[pd.DataFrame, dict[str, Any]]:
     else:
         raise ValueError(f"Unsupported file type: {suffix or 'unknown'}")
 
-    dataframe = dataframe.dropna(how="all").reset_index(drop=True)
     json_blob_columns = _detect_json_blob_columns(dataframe)
+    dataframe = _drop_empty_source_rows(dataframe, json_blob_columns)
 
     metadata: dict[str, Any] = {
         "format": source_format,
@@ -70,6 +70,16 @@ def _detect_json_blob_columns(dataframe: pd.DataFrame) -> list[str]:
             json_blob_columns.append(column)
 
     return json_blob_columns
+
+
+def _drop_empty_source_rows(
+    dataframe: pd.DataFrame,
+    json_blob_columns: list[str],
+) -> pd.DataFrame:
+    source_columns = [column for column in dataframe.columns if column not in json_blob_columns]
+    if not source_columns:
+        return dataframe.dropna(how="all").reset_index(drop=True)
+    return dataframe.dropna(how="all", subset=source_columns).reset_index(drop=True)
 
 
 def _looks_like_json_blob(value: Any) -> bool:
