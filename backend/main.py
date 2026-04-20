@@ -33,7 +33,12 @@ async def translate(
             temp_file.write(await file.read())
 
         result = run_pipeline(temp_path, target_resource_type=resource_type)
-        return result["fhir_mapping"]
+        validation_report = result["validation_report"]
+        return {
+            "bundle": result["fhir_bundle"],
+            "validation_report": validation_report,
+            "stats": _build_stats(validation_report),
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -41,3 +46,11 @@ async def translate(
     finally:
         if temp_path:
             Path(temp_path).unlink(missing_ok=True)
+
+
+def _build_stats(validation_report: dict) -> dict[str, int]:
+    return {
+        "rows_processed": int(validation_report.get("total_rows_processed", 0)),
+        "resources_created": int(validation_report.get("resources_created", 0)),
+        "error_count": int(validation_report.get("error_count", 0)),
+    }
