@@ -1,8 +1,6 @@
 # EHR → FHIR Translation Tool
 
-A provider-facing Streamlit web application that simulates a legacy EHR to FHIR R4 translation pipeline. Upload a legacy EHR file (CSV, JSON, or TXT), watch the agent work through each pipeline step in real time, then download a validated FHIR R4 Bundle.
-
-> **Note:** The backend LangGraph agent is not yet implemented. The app runs in simulation mode — pipeline steps are mocked with realistic delays and the output bundle is a pre-built FHIR R4 fixture.
+A provider-facing Streamlit web application for the legacy EHR to FHIR R4 translation pipeline. Upload a legacy EHR file (CSV or Excel), send it to the FastAPI/LangGraph backend, then download the generated FHIR R4 Bundle.
 
 ---
 
@@ -11,7 +9,6 @@ A provider-facing Streamlit web application that simulates a legacy EHR to FHIR 
 ```
 app/
 ├── app.py            # Main Streamlit application
-├── mock_bundle.py    # FHIR R4 Bundle fixture (Patient, Observation, Condition)
 ├── requirements.txt  # Python dependencies
 └── README.md         # This file
 ```
@@ -43,7 +40,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The app will open automatically at `http://localhost:8501`.
+The app will open automatically at `http://localhost:8501`. By default it calls `http://127.0.0.1:8000`; set `BACKEND_URL` in the environment or Streamlit secrets to point at a deployed backend.
 
 ---
 
@@ -67,7 +64,7 @@ The app will be live at a URL like `https://<your-app-name>.streamlit.app`.
 ## Usage
 
 1. Open the app in your browser.
-2. Drag and drop (or click to browse) a legacy EHR file — `.csv`, `.json`, or `.txt`.
+2. Drag and drop (or click to browse) a legacy EHR file — `.csv` or `.xlsx`.
 3. Click **Translate**.
 4. Watch each pipeline step complete in sequence:
    - Schema Analyzed
@@ -84,8 +81,8 @@ The app will be live at a URL like `https://<your-app-name>.streamlit.app`.
 |-------|------------|
 | UI | [Streamlit](https://streamlit.io) >= 1.32 |
 | FHIR standard | HL7 FHIR R4 |
-| Agent (planned) | LangGraph + Claude |
-| Storage (planned) | Amazon S3 |
+| Backend | FastAPI |
+| Agent | LangGraph + Claude |
 
 ---
 

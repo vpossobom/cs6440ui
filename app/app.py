@@ -2,20 +2,32 @@
 app.py
 EHR → FHIR Translation Tool — Provider-facing Streamlit UI.
 
-Simulates a LangGraph agent pipeline that:
+Runs a LangGraph agent pipeline that:
   1. Analyzes the uploaded EHR file schema
   2. Generates a FHIR mapping using an LLM
   3. Transforms the data
   4. Validates and packages the FHIR bundle
-
-No real backend is required — each pipeline step is mocked with realistic
-delays and a pre-built FHIR R4 Bundle is returned as the final output.
 """
 
+import json
+import os
 import time
+
+import requests
 import streamlit as st
 
-from mock_bundle import get_mock_bundle_json
+DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
+
+
+def _get_backend_url() -> str:
+    env_url = os.getenv("BACKEND_URL")
+    if env_url:
+        return env_url
+
+    try:
+        return st.secrets.get("BACKEND_URL") or DEFAULT_BACKEND_URL
+    except Exception:
+        return DEFAULT_BACKEND_URL
 
 # ---------------------------------------------------------------------------
 # Page configuration — must be the first Streamlit call
@@ -26,6 +38,8 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
+
+BACKEND_URL = _get_backend_url()
 
 # ---------------------------------------------------------------------------
 # Session state initialisation
@@ -42,6 +56,18 @@ if "uploaded_file_size" not in st.session_state:
 if "bundle_json" not in st.session_state:
     st.session_state.bundle_json = None
 
+if "validation_report" not in st.session_state:
+    st.session_state.validation_report = None
+
+if "stats" not in st.session_state:
+    st.session_state.stats = None
+
+if "error_message" not in st.session_state:
+    st.session_state.error_message = None
+
+if "selected_resource_type" not in st.session_state:
+    st.session_state.selected_resource_type = "Patient"
+
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
@@ -56,11 +82,46 @@ def _fmt_size(size_bytes: int) -> str:
         return f"{size_bytes / (1024 ** 2):.2f} MB"
 
 
-def _run_pipeline(step_placeholders: list) -> None:
+def _infer_resource_type(filename: str) -> str:
+    """Use the filename to select a sensible default target resource."""
+    lowered = filename.lower()
+    if "dentist" in lowered or "physician" in lowered:
+        return "Practitioner"
+    if "appointment" in lowered or "scheduling" in lowered or "event" in lowered:
+        return "Appointment"
+    return "Patient"
+
+
+def _post_translation(uploaded_file, resource_type: str) -> dict:
+    files = {
+        "file": (
+            uploaded_file.name,
+            uploaded_file.getvalue(),
+            uploaded_file.type or "application/octet-stream",
+        )
+    }
+    response = requests.post(
+        f"{BACKEND_URL.rstrip('/')}/translate",
+        files=files,
+        data={"resource_type": resource_type},
+        timeout=180,
+    )
+
+    if response.status_code != 200:
+        try:
+            detail = response.json().get("detail", response.text)
+        except ValueError:
+            detail = response.text
+        raise RuntimeError(f"Backend returned {response.status_code}: {detail}")
+
+    return response.json()
+
+
+def _run_pipeline(uploaded_file, resource_type: str, step_placeholders: list) -> None:
     """
-    Simulate the four-step agent pipeline.
-    Each step renders a spinner while running, then a green checkmark on
-    completion. Uses st.empty() placeholders so only the current line updates.
+    Run the backend translation and map its response into Streamlit session state.
+    The backend returns the final result in one response, so the UI shows a
+    single in-progress line before marking the remaining steps complete.
     """
     steps = [
         "Schema Analyzed",
@@ -69,20 +130,34 @@ def _run_pipeline(step_placeholders: list) -> None:
         "Bundle Validated",
     ]
 
+    step_placeholders[0].markdown(f"⏳ &nbsp; **{steps[0]}** — *backend running…*")
+
+    result = _post_translation(uploaded_file, resource_type)
+
     for i, label in enumerate(steps):
-        # Mark current step as running
-        step_placeholders[i].markdown(f"⏳ &nbsp; **{label}** — *running…*")
-
-        # Simulate work — vary delays slightly for realism
-        delay = 1.5 if i % 2 == 0 else 2.0
-        time.sleep(delay)
-
-        # Mark current step as done
         step_placeholders[i].markdown(f"✅ &nbsp; **{label}**")
 
-    # Store the generated bundle and advance stage
-    st.session_state.bundle_json = get_mock_bundle_json()
+    st.session_state.bundle_json = json.dumps(result["bundle"], indent=2, ensure_ascii=False)
+    st.session_state.validation_report = result.get("validation_report", {})
+    st.session_state.stats = result.get("stats", {})
+    st.session_state.error_message = None
     st.session_state.stage = "complete"
+
+
+def _resource_summary(bundle: dict | None) -> str:
+    if not bundle:
+        return "0 FHIR resources generated"
+
+    entries = bundle.get("entry") or []
+    resource_types = sorted(
+        {
+            entry.get("resource", {}).get("resourceType")
+            for entry in entries
+            if entry.get("resource", {}).get("resourceType")
+        }
+    )
+    type_text = ", ".join(resource_types) if resource_types else "FHIR resources"
+    return f"{len(entries)} FHIR resources generated ({type_text})"
 
 
 # ---------------------------------------------------------------------------
@@ -106,9 +181,9 @@ st.write("Drag and drop a legacy EHR export to begin the FHIR translation pipeli
 
 uploaded_file = st.file_uploader(
     label="Select a file",
-    type=["csv", "json", "txt"],
+    type=["csv", "xlsx"],
     label_visibility="collapsed",
-    help="Supported formats: CSV, JSON, TXT",
+    help="Supported formats: CSV, XLSX",
 )
 
 # When a new file arrives, update session state and reset to file_ready
@@ -122,6 +197,10 @@ if uploaded_file is not None:
     ):
         st.session_state.uploaded_file_name = new_name
         st.session_state.uploaded_file_size = new_size
+        st.session_state.selected_resource_type = _infer_resource_type(new_name)
+        st.session_state.validation_report = None
+        st.session_state.stats = None
+        st.session_state.error_message = None
         # Allow re-translation if a new file is dropped after a completed run
         if st.session_state.stage == "complete":
             st.session_state.stage = "file_ready"
@@ -134,6 +213,15 @@ if st.session_state.stage in ("file_ready", "translating", "complete"):
     name = st.session_state.uploaded_file_name
     size = _fmt_size(st.session_state.uploaded_file_size)
     st.info(f"📄 **{name}** — {size}")
+    st.selectbox(
+        "Target FHIR resource",
+        ["Patient", "Practitioner", "Appointment"],
+        key="selected_resource_type",
+        disabled=(st.session_state.stage == "translating"),
+    )
+
+if st.session_state.error_message:
+    st.error(st.session_state.error_message)
 
 st.write("")
 
@@ -148,10 +236,11 @@ translate_clicked = st.button(
 )
 
 # ---------------------------------------------------------------------------
-# Pipeline simulation (runs synchronously inside this script execution)
+# Backend translation (runs synchronously inside this script execution)
 # ---------------------------------------------------------------------------
 if translate_clicked and st.session_state.stage == "file_ready":
     st.session_state.stage = "translating"
+    st.session_state.error_message = None
     st.divider()
     st.subheader("Translation in Progress")
 
@@ -170,7 +259,20 @@ if translate_clicked and st.session_state.stage == "file_ready":
 
     time.sleep(0.3)   # brief pause so the user sees the initial state
 
-    _run_pipeline(placeholders)
+    try:
+        _run_pipeline(
+            uploaded_file,
+            st.session_state.selected_resource_type,
+            placeholders,
+        )
+    except (requests.RequestException, RuntimeError, KeyError, ValueError) as exc:
+        placeholders[0].markdown("❌ &nbsp; **Translation Failed**")
+        st.session_state.stage = "file_ready"
+        st.session_state.error_message = (
+            "The backend translation failed. "
+            f"Check that FastAPI is running and try again. Details: {exc}"
+        )
+        st.error(st.session_state.error_message)
     # After _run_pipeline, stage == "complete"; fall through to output section
 
 # ---------------------------------------------------------------------------
@@ -191,11 +293,18 @@ if st.session_state.stage == "complete":
     st.divider()
     st.subheader("Output")
 
-    st.success("Bundle saved to S3")
-    st.info(
-        "47 FHIR resources generated across 3 resource types  "
-        "(**Patient**, **Observation**, **Condition**)"
-    )
+    bundle = json.loads(st.session_state.bundle_json)
+    stats = st.session_state.stats or {}
+
+    st.success("FHIR Bundle generated")
+    st.info(_resource_summary(bundle))
+    st.metric("Rows processed", stats.get("rows_processed", 0))
+    col_created, col_errors = st.columns(2)
+    col_created.metric("Resources created", stats.get("resources_created", 0))
+    col_errors.metric("Validation errors", stats.get("error_count", 0))
+
+    with st.expander("View Validation Report", expanded=False):
+        st.json(st.session_state.validation_report or {})
 
     with st.expander("View Bundle", expanded=False):
         st.code(st.session_state.bundle_json, language="json")
