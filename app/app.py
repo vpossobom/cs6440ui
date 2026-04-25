@@ -16,7 +16,7 @@ import time
 import requests
 import streamlit as st
 
-DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
+DEFAULT_BACKEND_URL = "https://cs6440ui.onrender.com"
 
 
 def _get_backend_url() -> str:

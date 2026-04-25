@@ -40,7 +40,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The app will open automatically at `http://localhost:8501`. By default it calls `http://127.0.0.1:8000`; set `BACKEND_URL` in the environment or Streamlit secrets to point at a deployed backend.
+The app will open automatically at `http://localhost:8501`. By default it calls `https://cs6440ui.onrender.com`; set `BACKEND_URL` in the environment or Streamlit secrets to point at a different backend.
 
 ---
 
