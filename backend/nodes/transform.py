@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 from typing import Any, Callable
@@ -183,6 +184,7 @@ def _apply_appointment_defaults(resource: dict[str, Any], row: dict[str, Any]) -
 
     status = _normalize_appointment_status(
         _first_present(row, "status", "Status", "Canceled", "cancelled", "canceled")
+        or _pack_value(row, "extra_pack", "status")
     )
     resource.setdefault("status", status or "booked")
 
@@ -466,9 +468,30 @@ def _normalize_column_name(column: str) -> str:
 def _safe_id(value: Any) -> str | None:
     if _is_empty(value):
         return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
     safe = re.sub(r"[^A-Za-z0-9\-.]", "-", str(value).strip())
     safe = re.sub(r"-+", "-", safe).strip("-")
     return safe or None
+
+
+def _pack_value(row: dict[str, Any], column: str, key: str) -> Any:
+    raw_value = _first_present(row, column)
+    if _is_empty(raw_value):
+        return None
+
+    text = str(raw_value).strip()
+    if text.startswith("json::"):
+        text = text.removeprefix("json::")
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(payload, dict):
+        return payload.get(key)
+    return None
 
 
 def _json_safe_scalar(value: Any) -> Any:
