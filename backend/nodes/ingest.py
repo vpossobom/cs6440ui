@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from pandas.errors import EmptyDataError
 
 
 SUPPORTED_EXCEL_SUFFIXES = {".xls", ".xlsx"}
@@ -27,6 +28,8 @@ def read_source_file(file_path: str) -> tuple[pd.DataFrame, dict[str, Any]]:
 
     json_blob_columns = _detect_json_blob_columns(dataframe)
     dataframe = _drop_empty_source_rows(dataframe, json_blob_columns)
+    if dataframe.empty:
+        raise ValueError("Uploaded file contains no data rows to translate.")
 
     metadata: dict[str, Any] = {
         "format": source_format,
@@ -54,7 +57,12 @@ def _read_csv_with_fallback(path: Path) -> tuple[pd.DataFrame, str]:
     try:
         return pd.read_csv(path, encoding="utf-8"), "utf-8"
     except UnicodeDecodeError:
-        return pd.read_csv(path, encoding="latin-1"), "latin-1"
+        try:
+            return pd.read_csv(path, encoding="latin-1"), "latin-1"
+        except EmptyDataError as exc:
+            raise ValueError("Uploaded CSV is empty or has no columns.") from exc
+    except EmptyDataError as exc:
+        raise ValueError("Uploaded CSV is empty or has no columns.") from exc
 
 
 def _detect_json_blob_columns(dataframe: pd.DataFrame) -> list[str]:

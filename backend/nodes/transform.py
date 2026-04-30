@@ -14,6 +14,54 @@ from fhir.resources.practitioner import Practitioner
 
 RESOURCE_BUILDERS: dict[str, Callable[[dict[str, Any], list[dict[str, Any]]], Any]] = {}
 
+DEFAULT_SOURCE_COLUMNS = {
+    "Patient": {
+        "address",
+        "birthdate",
+        "city",
+        "cpf",
+        "email",
+        "gender",
+        "mobilephone",
+        "name",
+        "otherdocumentid",
+        "patientname",
+        "phone",
+        "sex",
+        "state",
+        "telephone",
+        "zipcode",
+        "zip_code",
+    },
+    "Practitioner": {
+        "birthdate",
+        "cpf",
+        "dentistname",
+        "email",
+        "mobilephone",
+        "name",
+        "otherdocumentid",
+        "phone",
+        "physicianname",
+        "physician_name",
+    },
+    "Appointment": {
+        "canceled",
+        "cancelled",
+        "date",
+        "dentistid",
+        "endtime",
+        "fromtime",
+        "patientid",
+        "patient_id",
+        "physicianid",
+        "physician_id",
+        "starttime",
+        "status",
+        "totime",
+    },
+}
+
 GENDER_MAP = {
     "m": "male",
     "male": "male",
@@ -46,10 +94,31 @@ def transform_node(state: dict[str, Any]) -> dict[str, Any]:
     mapping = state.get("fhir_mapping", {})
     resource_type = mapping.get("resource_type") or state.get("target_resource_type") or "Patient"
     mapping_entries = mapping.get("mappings", [])
+    mapping_warnings = list(mapping.get("mapping_warnings", []))
     builder = RESOURCE_BUILDERS.get(resource_type)
 
     if builder is None:
         raise ValueError(f"Unsupported FHIR resource type: {resource_type}")
+
+    if not mapping_entries and not _has_default_source_columns(dataframe, resource_type):
+        validation_error = {
+            "row": None,
+            "reason": "No usable FHIR mappings were generated for this file.",
+        }
+        bundle = _build_bundle([])
+        return {
+            "fhir_bundle": _resource_to_dict(bundle),
+            "validation_report": {
+                "resource_type": resource_type,
+                "total_rows_processed": int(len(dataframe)),
+                "rows_skipped_deleted": 0,
+                "resources_created": 0,
+                "validation_errors": [validation_error],
+                "mapping_warnings": mapping_warnings,
+                "error_count": 1,
+            },
+            "errors": state.get("errors", []) + [validation_error],
+        }
 
     resources = []
     validation_errors = []
@@ -82,6 +151,7 @@ def transform_node(state: dict[str, Any]) -> dict[str, Any]:
         "rows_skipped_deleted": skipped_deleted,
         "resources_created": len(resources),
         "validation_errors": validation_errors,
+        "mapping_warnings": mapping_warnings,
         "error_count": len(validation_errors),
     }
 
@@ -252,6 +322,15 @@ def _append_address_defaults(resource: dict[str, Any], row: dict[str, Any]) -> N
 def _build_bundle(resources: list[Any]) -> Bundle:
     entries = [{"resource": _resource_to_dict(resource)} for resource in resources]
     return Bundle(**{"resourceType": "Bundle", "type": "collection", "entry": entries})
+
+
+def _has_default_source_columns(dataframe: pd.DataFrame, resource_type: str) -> bool:
+    normalized_columns = {_normalize_column_name(column) for column in dataframe.columns}
+    default_columns = {
+        _normalize_column_name(column)
+        for column in DEFAULT_SOURCE_COLUMNS.get(resource_type, set())
+    }
+    return bool(normalized_columns & default_columns)
 
 
 def _resource_to_dict(resource: Any) -> dict[str, Any]:

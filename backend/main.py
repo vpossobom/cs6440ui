@@ -28,9 +28,13 @@ async def translate(
     temp_path = None
 
     try:
+        contents = await file.read()
+        if not contents:
+            raise ValueError("Uploaded file is empty.")
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_path = temp_file.name
-            temp_file.write(await file.read())
+            temp_file.write(contents)
 
         result = run_pipeline(temp_path, target_resource_type=resource_type)
         validation_report = result["validation_report"]
@@ -42,7 +46,7 @@ async def translate(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=_runtime_status_code(str(exc)), detail=str(exc)) from exc
     finally:
         if temp_path:
             Path(temp_path).unlink(missing_ok=True)
@@ -54,3 +58,12 @@ def _build_stats(validation_report: dict) -> dict[str, int]:
         "resources_created": int(validation_report.get("resources_created", 0)),
         "error_count": int(validation_report.get("error_count", 0)),
     }
+
+
+def _runtime_status_code(message: str) -> int:
+    lowered = message.lower()
+    if "rate limited" in lowered:
+        return 429
+    if "timed out" in lowered or "timeout" in lowered:
+        return 504
+    return 500
