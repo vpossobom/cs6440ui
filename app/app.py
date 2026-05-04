@@ -163,13 +163,7 @@ def _resource_summary(bundle: dict | None) -> str:
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-col_title, col_menu = st.columns([9, 1])
-with col_title:
-    st.title("EHR → FHIR Translation Tool")
-with col_menu:
-    st.write("")          # vertical alignment nudge
-    st.write("")
-    st.write("☰")         # cosmetic hamburger icon
+st.title("EHR → FHIR Translation Tool")
 
 st.divider()
 
@@ -317,10 +311,3 @@ if st.session_state.stage == "complete":
         use_container_width=True,
     )
 
-# ---------------------------------------------------------------------------
-# Footer
-# ---------------------------------------------------------------------------
-st.write("")
-st.write("")
-st.divider()
-st.caption("CareCode — EHR Migration Tool | Powered by Claude")
